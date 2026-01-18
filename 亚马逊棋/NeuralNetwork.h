@@ -8,7 +8,8 @@
 // 激活函数类型
 enum ActivationType {
     LINEAR, // 线性激活（回归任务）
-    RELU    // ReLU（可选，用于隐藏层）
+    RELU,   // ReLU（可选，用于隐藏层）
+    TANH    // Tanh（用于拟合平滑曲线）
 };
 
 // 矩阵与向量类型定义（简化实现）
@@ -24,6 +25,7 @@ private:
     double lr;                                 // 学习率
 
     // 前向传播中间结果（用于反向传播）
+    std::vector<Vector> layer_inputs;
     std::vector<Vector> layer_outputs;
 
     double activate(double x, ActivationType type) const;
@@ -37,6 +39,8 @@ public:
 
     Vector forward(const Vector& input);
     void trainSample(const Vector& input, const Vector& target);
+    void trainBatch(const std::vector<Vector>& inputs,
+                    const std::vector<Vector>& targets);
     double getLearningRate() const { return lr; }
     const std::vector<int>& getLayerSizes() const { return layer_sizes; }
     const std::vector<ActivationType>& getActivations() const { return activations; }

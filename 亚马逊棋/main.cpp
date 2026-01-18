@@ -14,11 +14,11 @@ static double normalize(double value, const Normalizer& norm) {
     if (norm.max_val - norm.min_val == 0.0) {
         return 0.0;
     }
-    return (value - norm.min_val) / (norm.max_val - norm.min_val);
+    return (value - norm.min_val) / (norm.max_val - norm.min_val) * 2.0 - 1.0;
 }
 
 static double denormalize(double value, const Normalizer& norm) {
-    return value * (norm.max_val - norm.min_val) + norm.min_val;
+    return (value + 1.0) * 0.5 * (norm.max_val - norm.min_val) + norm.min_val;
 }
 
 int main() {
@@ -109,7 +109,7 @@ int main() {
 
     std::vector<ActivationType> activations;
     for (int i = 0; i < hidden_layers; ++i) {
-        activations.push_back(RELU);
+        activations.push_back(TANH);
     }
     activations.push_back(LINEAR);
 
@@ -119,7 +119,7 @@ int main() {
     std::cout << "\n网络结构:" << std::endl;
     std::cout << "输入层神经元数: 1" << std::endl;
     for (int i = 0; i < hidden_layers; ++i) {
-        std::cout << "隐藏层" << (i + 1) << "神经元数: " << layer_sizes[i + 1] << " | 激活函数: ReLU" << std::endl;
+        std::cout << "隐藏层" << (i + 1) << "神经元数: " << layer_sizes[i + 1] << " | 激活函数: Tanh" << std::endl;
     }
     std::cout << "输出层神经元数: 1 | 激活函数: Linear" << std::endl;
     std::cout << "学习率: " << model.getLearningRate() << std::endl;
@@ -128,8 +128,8 @@ int main() {
     std::cout << "\n开始训练..." << std::endl;
     for (int epoch = 0; epoch <= epochs; ++epoch) {
         double loss_sum = 0.0;
+        model.trainBatch(inputs, targets);
         for (size_t i = 0; i < inputs.size(); ++i) {
-            model.trainSample(inputs[i], targets[i]);
             Vector pred = model.forward(inputs[i]);
             double diff = pred[0] - targets[i][0];
             loss_sum += diff * diff;
