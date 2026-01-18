@@ -22,11 +22,17 @@ void DynamicNN::configure(const std::vector<int>& sizes,
         int out_size = layer_sizes[i + 1];
         Matrix w(out_size, Vector(in_size));
         Vector b(out_size, 0.0);
+        double scale = 1.0;
+        if (activations[i] == RELU) {
+            scale = std::sqrt(2.0 / static_cast<double>(in_size));
+        } else {
+            scale = std::sqrt(1.0 / static_cast<double>(in_size));
+        }
 
         for (int r = 0; r < out_size; ++r) {
             for (int c = 0; c < in_size; ++c) {
                 double rand_weight = (std::rand() / (double)RAND_MAX) * 2.0 - 1.0;
-                w[r][c] = rand_weight * 0.5;
+                w[r][c] = rand_weight * scale;
             }
             b[r] = 0.0;
         }
@@ -39,6 +45,9 @@ double DynamicNN::activate(double x, ActivationType type) const {
     if (type == RELU) {
         return x > 0.0 ? x : 0.0;
     }
+    if (type == TANH) {
+        return std::tanh(x);
+    }
     return x;
 }
 
@@ -46,10 +55,15 @@ double DynamicNN::activateDerivative(double x, ActivationType type) const {
     if (type == RELU) {
         return x > 0.0 ? 1.0 : 0.0;
     }
+    if (type == TANH) {
+        double t = std::tanh(x);
+        return 1.0 - t * t;
+    }
     return 1.0;
 }
 
 Vector DynamicNN::forward(const Vector& input) {
+    layer_inputs.clear();
     layer_outputs.clear();
     layer_outputs.push_back(input);
 
@@ -57,13 +71,16 @@ Vector DynamicNN::forward(const Vector& input) {
     for (size_t layer = 0; layer < weights.size(); ++layer) {
         int out_size = static_cast<int>(weights[layer].size());
         Vector next(out_size, 0.0);
+        Vector z(out_size, 0.0);
         for (int j = 0; j < out_size; ++j) {
             double sum = biases[layer][j];
             for (size_t i = 0; i < current.size(); ++i) {
                 sum += weights[layer][j][i] * current[i];
             }
+            z[j] = sum;
             next[j] = activate(sum, activations[layer]);
         }
+        layer_inputs.push_back(z);
         current = next;
         layer_outputs.push_back(current);
     }
@@ -71,43 +88,67 @@ Vector DynamicNN::forward(const Vector& input) {
 }
 
 void DynamicNN::trainSample(const Vector& input, const Vector& target) {
-    Vector output = forward(input);
-    size_t layer_count = weights.size();
-    std::vector<Vector> deltas(layer_count);
+    std::vector<Vector> inputs(1, input);
+    std::vector<Vector> targets(1, target);
+    trainBatch(inputs, targets);
+}
 
-    // 输出层误差
-    size_t last = layer_count - 1;
-    deltas[last] = Vector(output.size(), 0.0);
-    for (size_t j = 0; j < output.size(); ++j) {
-        double error = output[j] - target[j];
-        double deriv = activateDerivative(output[j], activations[last]);
-        deltas[last][j] = error * deriv;
+void DynamicNN::trainBatch(const std::vector<Vector>& inputs,
+                           const std::vector<Vector>& targets) {
+    if (inputs.empty()) {
+        return;
+    }
+    size_t layer_count = weights.size();
+    std::vector<Matrix> grad_w(layer_count);
+    std::vector<Vector> grad_b(layer_count);
+    for (size_t layer = 0; layer < layer_count; ++layer) {
+        grad_w[layer] = Matrix(weights[layer].size(),
+                               Vector(weights[layer][0].size(), 0.0));
+        grad_b[layer] = Vector(weights[layer].size(), 0.0);
     }
 
-    // 反向传播
-    for (int layer = static_cast<int>(layer_count) - 1; layer >= 0; --layer) {
-        Vector prev_output = layer_outputs[layer];
+    for (size_t sample = 0; sample < inputs.size(); ++sample) {
+        Vector output = forward(inputs[sample]);
+        std::vector<Vector> deltas(layer_count);
 
-        // 计算上一层误差（若存在）
-        if (layer > 0) {
-            int prev_size = layer_sizes[layer];
-            deltas[layer - 1] = Vector(prev_size, 0.0);
-            for (int i = 0; i < prev_size; ++i) {
-                double sum = 0.0;
-                for (size_t j = 0; j < deltas[layer].size(); ++j) {
-                    sum += weights[layer][j][i] * deltas[layer][j];
-                }
-                double deriv = activateDerivative(layer_outputs[layer][i], activations[layer - 1]);
-                deltas[layer - 1][i] = sum * deriv;
-            }
+        size_t last = layer_count - 1;
+        deltas[last] = Vector(output.size(), 0.0);
+        for (size_t j = 0; j < output.size(); ++j) {
+            double error = output[j] - targets[sample][j];
+            double deriv = activateDerivative(layer_inputs[last][j], activations[last]);
+            deltas[last][j] = error * deriv;
         }
 
-        // 更新权重与偏置
+        for (int layer = static_cast<int>(layer_count) - 1; layer >= 0; --layer) {
+            if (layer > 0) {
+                int prev_size = layer_sizes[layer];
+                deltas[layer - 1] = Vector(prev_size, 0.0);
+                for (int i = 0; i < prev_size; ++i) {
+                    double sum = 0.0;
+                    for (size_t j = 0; j < deltas[layer].size(); ++j) {
+                        sum += weights[layer][j][i] * deltas[layer][j];
+                    }
+                    double deriv = activateDerivative(layer_inputs[layer - 1][i], activations[layer - 1]);
+                    deltas[layer - 1][i] = sum * deriv;
+                }
+            }
+
+            for (size_t j = 0; j < weights[layer].size(); ++j) {
+                for (size_t i = 0; i < weights[layer][j].size(); ++i) {
+                    grad_w[layer][j][i] += deltas[layer][j] * layer_outputs[layer][i];
+                }
+                grad_b[layer][j] += deltas[layer][j];
+            }
+        }
+    }
+
+    double scale = lr / static_cast<double>(inputs.size());
+    for (size_t layer = 0; layer < layer_count; ++layer) {
         for (size_t j = 0; j < weights[layer].size(); ++j) {
             for (size_t i = 0; i < weights[layer][j].size(); ++i) {
-                weights[layer][j][i] -= lr * deltas[layer][j] * prev_output[i];
+                weights[layer][j][i] -= scale * grad_w[layer][j][i];
             }
-            biases[layer][j] -= lr * deltas[layer][j];
+            biases[layer][j] -= scale * grad_b[layer][j];
         }
     }
 }
